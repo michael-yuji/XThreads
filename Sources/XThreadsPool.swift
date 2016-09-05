@@ -1,6 +1,6 @@
 //
-//  XThreadsPool.swift
-//  XThreads
+//  XThreadPool.swift
+//  XThread
 //
 //  Created by yuuji on 9/5/16.
 //
@@ -8,7 +8,7 @@
 
 import CKit
 
-public class XThreadsPool {
+public class XThreadPool {
     public var threadsCount: Int
     var threads: [XThread]
     
