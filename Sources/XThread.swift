@@ -44,7 +44,11 @@ public class XThread {
             queue.blocks.append(block)
             queue.blocksCount += 1
             if queue.blocksCount == 1 {
+                #if os(Linux)
+                pthread_kill(thread, SIGUSR1)
+                #else
                 pthread_kill(thread!, SIGUSR1)
+                #endif
             }
         }
     }
@@ -87,6 +91,10 @@ public class XThread {
     }
     
     deinit {
+        #if os(Linux)
+        pthread_exit(&thread)
+        #else
         pthread_exit(thread)
+        #endif
     }
 }
