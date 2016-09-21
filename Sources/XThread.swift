@@ -7,17 +7,24 @@
 
 import CKit
 
+
+public protocol XThreadDelegate {
+    func xthread_idle(thread: XThread)
+}
+
 public class XThread {
+    
     class BlockQueue {
         var blocksCount: Int = 0
         var mutex: pthread_mutex_t = pthread_mutex_t()
         var blocks = [() -> Void]()
-        
+        var t_ref: XThread
         var mutexPointer: UnsafeMutablePointer<pthread_mutex_t> {
             return mutablePointer(of: &mutex)
         }
         
-        init() {
+        init(thread: XThread) {
+            self.t_ref = thread
             pthread_mutex_init(&mutex, nil)
         }
     }
@@ -30,7 +37,10 @@ public class XThread {
     var thread: pthread_t?
     #endif
     
-    var queue = BlockQueue()
+    var queue: BlockQueue!
+    var delegate: XThreadDelegate?
+    
+    private var time: time_t = 0;
     
     @inline(__always)
     private func withMutex(_ execute: () -> Void) {
@@ -53,13 +63,16 @@ public class XThread {
         }
     }
     
-    public init() {
+    
+    public init(delegate: XThreadDelegate? = nil) {
     
         var blk_sigs = sigset_t()
+        self.delegate = delegate
+        self.queue = BlockQueue(thread: self)
         
         if !XThread.initialized {
             sigemptyset(&blk_sigs)
-            sigaddset(&blk_sigs, SIGUSR1)
+            sigaddset(&blk_sigs, XthreadGlobalConf.signal)
             pthread_sigmask(SIG_BLOCK, &blk_sigs, nil)
         }
         
@@ -74,7 +87,7 @@ public class XThread {
             var signals = sigset_t()
             var caught: Int32 = 0
             sigemptyset(&signals)
-            sigaddset(&signals, SIGUSR1)
+            sigaddset(&signals, XthreadGlobalConf.signal)
             
             while true {
                 while blockQueue.blocksCount > 0 {
@@ -84,6 +97,10 @@ public class XThread {
                     blockQueue.blocksCount -= 1
                     pthread_mutex_unlock(blockQueue.mutexPointer)
                 }
+                
+                blockQueue.t_ref.delegate?.xthread_idle(thread: blockQueue.t_ref)
+                
+                // put thread to sleep
                 sigwait(&signals, &caught)
             }
             

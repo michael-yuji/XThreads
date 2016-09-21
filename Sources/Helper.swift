@@ -16,3 +16,7 @@ extension Array {
         }
     }
 }
+
+public struct XthreadGlobalConf {
+    static var signal: Int32 = SIGUSR1
+}
