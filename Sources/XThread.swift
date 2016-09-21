@@ -12,12 +12,16 @@ public protocol XThreadDelegate {
     func xthread_idle(thread: XThread)
 }
 
+public struct blkattr {
+    var timeout: time_t = 0
+}
+
 public class XThread {
     
     class BlockQueue {
         var blocksCount: Int = 0
         var mutex: pthread_mutex_t = pthread_mutex_t()
-        var blocks = [() -> Void]()
+        var blocks = [(time_t, () -> Void)]()
         var t_ref: XThread
         var mutexPointer: UnsafeMutablePointer<pthread_mutex_t> {
             return mutablePointer(of: &mutex)
@@ -40,7 +44,8 @@ public class XThread {
     var queue: BlockQueue!
     var delegate: XThreadDelegate?
     
-    private var time: time_t = 0;
+    var lastExecutionStartedTime: time_t = 0;
+    var currentExecutionTimeout: time_t = 0;
     
     @inline(__always)
     private func withMutex(_ execute: () -> Void) {
@@ -49,9 +54,9 @@ public class XThread {
         pthread_mutex_unlock(&queue.mutex)
     }
     
-    public func exec(block: @escaping () -> Void) {
+    public func exec(timeout: time_t = 0, block: @escaping () -> Void) {
         withMutex {
-            queue.blocks.append(block)
+            queue.blocks.append((timeout, block))
             queue.blocksCount += 1
             if queue.blocksCount == 1 {
                 #if os(Linux)
@@ -63,20 +68,31 @@ public class XThread {
         }
     }
     
-    
-    public init(delegate: XThreadDelegate? = nil) {
-    
-        var blk_sigs = sigset_t()
-        self.delegate = delegate
-        self.queue = BlockQueue(thread: self)
-        
-        if !XThread.initialized {
-            sigemptyset(&blk_sigs)
-            sigaddset(&blk_sigs, XthreadGlobalConf.signal)
-            pthread_sigmask(SIG_BLOCK, &blk_sigs, nil)
+    public func exec(_ x: (timeout: time_t, block: () -> Void)) {
+        withMutex {
+            queue.blocks.append(x)
+            queue.blocksCount += 1
+            if queue.blocksCount == 1 {
+                #if os(Linux)
+                    pthread_kill(thread, SIGUSR1)
+                #else
+                    pthread_kill(thread!, SIGUSR1)
+                #endif
+            }
         }
-        
+    }
+    
+    func restart() {
+        guard let thread = thread else { return }
+        pthread_cancel(thread)
+        self.queue.blocks.removeFirst() // this is the block causing problem
+        thread_run()
+    }
+    
+    private func thread_run() {
         pthread_create(&thread, nil, { (pointer) -> UnsafeMutableRawPointer? in
+            
+            pthread_setcanceltype(PTHREAD_CANCEL_ENABLE, nil)
             
             #if os(OSX) || os(iOS) || os(watchOS) || os(tvOS)
                 let blockQueue = pointer.cast(to: BlockQueue.self).pointee
@@ -91,7 +107,12 @@ public class XThread {
             
             while true {
                 while blockQueue.blocksCount > 0 {
-                    blockQueue.blocks.first!()
+                    let first = blockQueue.blocks.first!
+                    blockQueue.t_ref.lastExecutionStartedTime = time_t()
+                    blockQueue.t_ref.currentExecutionTimeout = first.0
+                    first.1()
+                    blockQueue.t_ref.lastExecutionStartedTime = -1
+                    blockQueue.t_ref.currentExecutionTimeout = 0
                     pthread_mutex_lock(blockQueue.mutexPointer)
                     _ = blockQueue.blocks.removeFirst()
                     blockQueue.blocksCount -= 1
@@ -105,6 +126,21 @@ public class XThread {
             }
             
             }, UnsafeMutableRawPointer(mutablePointer(of: &self.queue)))
+    }
+    
+    public init(delegate: XThreadDelegate? = nil) {
+    
+        var blk_sigs = sigset_t()
+        self.delegate = delegate
+        self.queue = BlockQueue(thread: self)
+        
+        if !XThread.initialized {
+            sigemptyset(&blk_sigs)
+            sigaddset(&blk_sigs, XthreadGlobalConf.signal)
+            pthread_sigmask(SIG_BLOCK, &blk_sigs, nil)
+        }
+    
+        thread_run()
     }
     
     deinit {
