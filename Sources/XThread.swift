@@ -3,7 +3,7 @@ import CKit
 import Foundation
 
 public protocol XThreadDelegate {
-    func xthreadOnIdle(thread: XThreadPoxy) -> Bool
+    func xthreadOnIdle(thread: XThreadProxy) -> Bool
 }
 
 enum ThreadStatus {
@@ -11,7 +11,7 @@ enum ThreadStatus {
     case runBlock
 }
 
-public struct XThreadPoxy {
+public struct XThreadProxy {
     var __ptr: UnsafeMutablePointer<XThread.Context>
 
     public func exec(block: @escaping () -> Void) throws {
@@ -46,6 +46,7 @@ public class XThread {
             // pthread_cleanup_push
             #if os(OSX) || os(iOS) || os(tvOS) || os(watchOS)
             var __handler = __darwin_pthread_handler_rec(__routine: {
+                $0!.assumingMemoryBound(to: Context.self).pointee.trigger.close()
                 $0!.assumingMemoryBound(to: Context.self).deallocate(capacity: 1)
             }, __arg: rawPointer, __next: __self.pointee.__cleanup_stack)
             __self.pointee.__cleanup_stack = mutablePointer(of: &__handler)
@@ -55,7 +56,7 @@ public class XThread {
             
             while (true) {
                 if let delegate = ptr.pointee.delegate {
-                    if !delegate.xthreadOnIdle(thread: XThreadPoxy(__ptr: ptr)) {
+                    if !delegate.xthreadOnIdle(thread: XThreadProxy(__ptr: ptr)) {
                         break
                     }
                 }
@@ -66,10 +67,8 @@ public class XThread {
                 }
                 
                 ptr.pointee.busy = false
-                print("Thread \(ptr.pointee.uuid) waiting for trigger \(ptr.pointee.trigger.kq)")
                 ptr.pointee.trigger.wait()
                 ptr.pointee.busy = true
-                print("Thread \(ptr.pointee.uuid) received trigger")
             }
 
             // pthread_cleanup_pop
@@ -89,6 +88,7 @@ public class XThread {
         
         #if os(Linux)
         context.deallocate(capacity: 1)
+        context.trigger.close()
         #endif
     }
 }
@@ -146,10 +146,9 @@ public extension XThread {
             }
 
             self.block = block
-            print("Triggering \(uuid) \(trigger.kq)")
             self.trigger.trigger()
         }
-        
+
         func cancel() {
             pthread_cancel(self.thread!)
         }
