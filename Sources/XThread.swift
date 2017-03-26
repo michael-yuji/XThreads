@@ -94,11 +94,11 @@ public class XThread {
 }
 
 public extension XThread {
-    func cancel() {
+    public func cancel() {
         self.context.pointee.cancel()
     }
 
-    func exec(block: @escaping () -> Void) throws {
+    public func exec(block: @escaping () -> Void) throws {
         try self.context.pointee.exec(block: block)
     }
 }
