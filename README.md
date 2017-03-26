@@ -1,6 +1,6 @@
 # XThreads
 
-A threading library using pthread
+A lock-free threading library using pthread.
 
 ## usage:
 
